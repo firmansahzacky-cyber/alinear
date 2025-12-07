@@ -1,256 +1,231 @@
 import streamlit as st
 import numpy as np
-import matplotlib.pyplot as plt
+from PIL import Image, ImageFilter
 
-# =========================
-# Helper: Bentuk dasar
-# =========================
-def get_base_shape(shape_name: str) -> np.ndarray:
+# ======================================================
+# CONFIG DASAR
+# ======================================================
+st.set_page_config(
+    page_title="Matrix Application with Image",
+    layout="wide"
+)
+
+# ======================================================
+# FUNGSI BANTU
+# ======================================================
+def load_image(uploaded_file):
+    """Load gambar dan ubah ke RGBA."""
+    return Image.open(uploaded_file).convert("RGBA")
+
+
+def apply_affine(img, M):
     """
-    Mengembalikan koordinat bentuk dasar (Nx2).
-    Default: persegi.
+    Terapkan transformasi affin ke gambar.
+    M adalah matriks 3x3.
+    PIL butuh parameter (a,b,c,d,e,f) dari 2x3 pertama.
     """
-    if shape_name == "Square":
-        # Persegi dengan titik terakhir sama dengan titik pertama (biar tertutup)
-        points = np.array([
-            [0, 0],
-            [1, 0],
-            [1, 1],
-            [0, 1],
-            [0, 0]
-        ], dtype=float)
-    elif shape_name == "Triangle":
-        points = np.array([
-            [0, 0],
-            [1, 0],
-            [0.5, 1],
-            [0, 0]
-        ], dtype=float)
-    else:
-        # Default: persegi
-        points = np.array([
-            [0, 0],
-            [1, 0],
-            [1, 1],
-            [0, 1],
-            [0, 0]
-        ], dtype=float)
-    return points
+    a, b, c = M[0, 0], M[0, 1], M[0, 2]
+    d, e, f = M[1, 0], M[1, 1], M[1, 2]
+    return img.transform(
+        img.size,
+        Image.AFFINE,
+        (a, b, c, d, e, f),
+        resample=Image.BICUBIC
+    )
 
 
-# =========================
-# Helper: Matriks Transformasi 3x3 (homogeneous)
-# =========================
-def translation_matrix(dx: float, dy: float) -> np.ndarray:
-    return np.array([
-        [1, 0, dx],
-        [0, 1, dy],
-        [0, 0, 1]
-    ], dtype=float)
+def remove_white_bg(pil_img, threshold=240):
+    """Menghapus background putih (sederhana) menjadi transparan."""
+    img = pil_img.convert("RGBA")
+    data = np.array(img)
+    r, g, b, a = data.T
+
+    mask = (r > threshold) & (g > threshold) & (b > threshold)
+    data[..., -1][mask.T] = 0  # alpha = 0 (transparan)
+
+    return Image.fromarray(data)
 
 
-def scaling_matrix(sx: float, sy: float) -> np.ndarray:
-    return np.array([
-        [sx, 0, 0],
-        [0, sy, 0],
-        [0, 0, 1]
-    ], dtype=float)
+def show_matrix(M):
+    """Tampilkan matriks M dalam bentuk tabel dan LaTeX tanpa error."""
+    st.markdown("### 🔢 Matriks Transformasi (M)")
 
+    # Tampil sebagai tabel angka
+    st.write(M)
 
-def rotation_matrix(theta_deg: float) -> np.ndarray:
-    theta = np.deg2rad(theta_deg)
-    c = np.cos(theta)
-    s = np.sin(theta)
-    return np.array([
-        [c, -s, 0],
-        [s,  c, 0],
-        [0,  0, 1]
-    ], dtype=float)
+    # Tampil sebagai LaTeX (pakai string biasa, backslash di-escape)
+    latex_matrix = (
+        "M = "
+        "\\begin{bmatrix}"
+        f"{M[0,0]:.2f} & {M[0,1]:.2f} & {M[0,2]:.2f} \\\\ "
+        f"{M[1,0]:.2f} & {M[1,1]:.2f} & {M[1,2]:.2f} \\\\ "
+        f"{M[2,0]:.2f} & {M[2,1]:.2f} & {M[2,2]:.2f}"
+        "\\end{bmatrix}"
+    )
 
+    st.latex(latex_matrix)
 
-def shearing_matrix(shx: float, shy: float) -> np.ndarray:
-    # shearing di sumbu x dan y
-    return np.array([
-        [1,  shx, 0],
-        [shy, 1,  0],
-        [0,  0,   1]
-    ], dtype=float)
+# ======================================================
+# SIDEBAR (PROFIL + PEMILIHAN FITUR)
+# ======================================================
+with st.sidebar:
+    st.title("👤 Profile")
 
+    nama = st.text_input("Nama", "Zacky Firmansah")
+    nim = st.text_input("NIM", "")
 
-def reflection_matrix(axis: str) -> np.ndarray:
-    """
-    Beberapa opsi refleksi:
-    - x-axis
-    - y-axis
-    - origin
-    - y = x
-    - y = -x
-    """
-    if axis == "x-axis":
-        mat = np.array([
-            [1,  0, 0],
-            [0, -1, 0],
-            [0,  0, 1]
-        ], dtype=float)
-    elif axis == "y-axis":
-        mat = np.array([
-            [-1, 0, 0],
-            [0,  1, 0],
-            [0,  0, 1]
-        ], dtype=float)
-    elif axis == "origin":
-        mat = np.array([
-            [-1, 0, 0],
-            [0, -1, 0],
-            [0,  0, 1]
-        ], dtype=float)
-    elif axis == "y = x":
-        mat = np.array([
-            [0, 1, 0],
-            [1, 0, 0],
+    st.markdown("---")
+    fitur = st.selectbox(
+        "Pilih Fitur:",
+        [
+            "Translation",
+            "Scaling",
+            "Rotation",
+            "Shearing",
+            "Reflection",
+            "Image Processing"
+        ]
+    )
+
+    st.markdown("---")
+    st.caption("Upload gambar di bagian utama (kanan).")
+
+# ======================================================
+# JUDUL HALAMAN
+# ======================================================
+st.title("📐 Matrix Application with Image")
+st.caption(
+    f"Developed by: **{nama}**" + (f" | NIM: {nim}" if nim else "")
+)
+
+# ======================================================
+# UPLOAD GAMBAR
+# ======================================================
+uploaded_file = st.file_uploader(
+    "Upload Gambar (PNG / JPG / JPEG)",
+    type=["png", "jpg", "jpeg"]
+)
+
+if uploaded_file is None:
+    st.info("Silakan upload gambar terlebih dahulu.")
+    st.stop()
+
+img = load_image(uploaded_file)
+
+# Layout 2 kolom: kiri = kontrol, kanan = hasil
+col_control, col_result = st.columns([1, 2])
+
+# ======================================================
+# KONTROL & PERHITUNGAN MATRIKS
+# ======================================================
+with col_control:
+    st.subheader("⚙️ Pengaturan")
+
+    M = None  # matriks transformasi untuk fitur matriks
+
+    if fitur == "Translation":
+        tx = st.slider("Geser X (tx)", -300, 300, 0)
+        ty = st.slider("Geser Y (ty)", -300, 300, 0)
+
+        M = np.array([
+            [1, 0, tx],
+            [0, 1, ty],
             [0, 0, 1]
-        ], dtype=float)
-    elif axis == "y = -x":
-        mat = np.array([
-            [0, -1, 0],
-            [-1, 0, 0],
-            [0,  0, 1]
-        ], dtype=float)
+        ])
+
+    elif fitur == "Scaling":
+        sx = st.slider("Scale X (sx)", 0.1, 3.0, 1.0)
+        sy = st.slider("Scale Y (sy)", 0.1, 3.0, 1.0)
+
+        M = np.array([
+            [sx, 0,  0],
+            [0,  sy, 0],
+            [0,  0,  1]
+        ])
+
+    elif fitur == "Rotation":
+        angle = st.slider("Sudut Rotasi (derajat)", -180, 180, 0)
+        rad = np.deg2rad(angle)
+        cos_a, sin_a = np.cos(rad), np.sin(rad)
+
+        M = np.array([
+            [cos_a, -sin_a, 0],
+            [sin_a,  cos_a, 0],
+            [0,      0,     1]
+        ])
+
+    elif fitur == "Shearing":
+        shx = st.slider("Shear X (shx)", -1.0, 1.0, 0.0, 0.05)
+        shy = st.slider("Shear Y (shy)", -1.0, 1.0, 0.0, 0.05)
+
+        M = np.array([
+            [1,   shx, 0],
+            [shy, 1,   0],
+            [0,   0,   1]
+        ])
+
+    elif fitur == "Reflection":
+        axis = st.selectbox("Pilih Sumbu Refleksi", ["X", "Y", "XY"])
+
+        if axis == "X":
+            M = np.array([
+                [1,  0, 0],
+                [0, -1, 0],
+                [0,  0, 1]
+            ])
+        elif axis == "Y":
+            M = np.array([
+                [-1, 0, 0],
+                [0,  1, 0],
+                [0,  0, 1]
+            ])
+        else:  # XY
+            M = np.array([
+                [-1, 0, 0],
+                [0, -1, 0],
+                [0,  0, 1]
+            ])
+
+    elif fitur == "Image Processing":
+        blur = st.slider("Blur (Gaussian Blur)", 0, 10, 0)
+        sharpen = st.slider("Sharpen (ketajaman)", 0, 5, 0)
+        remove_bg = st.checkbox("Remove White Background", value=False)
+
+# ======================================================
+# HASIL / PREVIEW
+# ======================================================
+with col_result:
+    st.subheader("🖼️ Preview")
+
+    if fitur == "Image Processing":
+        processed = img.copy()
+
+        if blur > 0:
+            processed = processed.filter(
+                ImageFilter.GaussianBlur(radius=blur)
+            )
+
+        for _ in range(sharpen):
+            processed = processed.filter(ImageFilter.SHARPEN)
+
+        if remove_bg:
+            processed = remove_white_bg(processed)
+
+        col1, col2 = st.columns(2)
+        col1.image(img, caption="Original", use_column_width=True)
+        col2.image(processed, caption="Processed", use_column_width=True)
+
     else:
-        mat = np.eye(3)
-    return mat
+        # Fitur matriks: gunakan M untuk transformasi
+        transformed = apply_affine(img, M)
 
-
-# =========================
-# Helper: Apply Transform
-# =========================
-def apply_transformation(points_2d: np.ndarray, T: np.ndarray) -> np.ndarray:
-    """
-    points_2d : array Nx2
-    T         : matriks transformasi 3x3 (homogeneous)
-
-    Mengembalikan titik hasil transformasi Nx2.
-    """
-    # tambahkan kolom ones untuk homogeneous coord
-    ones = np.ones((points_2d.shape[0], 1), dtype=float)
-    points_h = np.hstack([points_2d, ones])            # N x 3
-    transformed_h = (T @ points_h.T).T                 # (3x3 @ 3xN)T -> N x 3
-
-    # bagi dengan kolom terakhir (kalau bukan 1)
-    w = transformed_h[:, 2:3]
-    w[w == 0] = 1.0
-    transformed_2d = transformed_h[:, :2] / w
-    return transformed_2d
-
-
-# =========================
-# Main App
-# =========================
-def main():
-    st.title("Matrix Transformation Web App")
-    st.write(
-        """
-        Aplikasi ini menunjukkan **penerapan matriks transformasi 2D** 
-        pada sebuah bentuk (square / triangle).  
-        Fitur yang tersedia:
-        1. Translation  
-        2. Scaling  
-        3. Rotation  
-        4. Shearing  
-        5. Reflection  
-        """
-    )
-
-    # Sidebar: pilihan bentuk & transformasi
-    st.sidebar.header("Pengaturan")
-    shape_name = st.sidebar.selectbox(
-        "Pilih bentuk awal",
-        ["Square", "Triangle"]
-    )
-
-    transform_type = st.sidebar.selectbox(
-        "Pilih jenis transformasi",
-        ["Translation", "Scaling", "Rotation", "Shearing", "Reflection"]
-    )
-
-    # Ambil titik bentuk dasar
-    base_points = get_base_shape(shape_name)
-
-    # Ambil parameter transformasi sesuai jenisnya
-    T = np.eye(3)
-
-    if transform_type == "Translation":
-        st.subheader("Translation")
-        dx = st.number_input("dx (geser sumbu x)", value=1.0, step=0.5)
-        dy = st.number_input("dy (geser sumbu y)", value=1.0, step=0.5)
-        T = translation_matrix(dx, dy)
-
-    elif transform_type == "Scaling":
-        st.subheader("Scaling")
-        sx = st.number_input("sx (skala sumbu x)", value=1.5, step=0.1)
-        sy = st.number_input("sy (skala sumbu y)", value=1.5, step=0.1)
-        T = scaling_matrix(sx, sy)
-
-    elif transform_type == "Rotation":
-        st.subheader("Rotation")
-        theta = st.number_input("Sudut rotasi (derajat)", value=45.0, step=5.0)
-        T = rotation_matrix(theta)
-
-    elif transform_type == "Shearing":
-        st.subheader("Shearing")
-        shx = st.number_input("Shear di sumbu x (shx)", value=0.5, step=0.1)
-        shy = st.number_input("Shear di sumbu y (shy)", value=0.0, step=0.1)
-        T = shearing_matrix(shx, shy)
-
-    elif transform_type == "Reflection":
-        st.subheader("Reflection")
-        axis = st.selectbox(
-            "Pilih sumbu / garis refleksi",
-            ["x-axis", "y-axis", "origin", "y = x", "y = -x"]
+        col1, col2 = st.columns(2)
+        col1.image(img, caption="Original", use_column_width=True)
+        col2.image(
+            transformed,
+            caption=f"Result - {fitur}",
+            use_column_width=True
         )
-        T = reflection_matrix(axis)
 
-    # Hitung hasil transformasi
-    transformed_points = apply_transformation(base_points, T)
-
-    # Tampilkan matriks transformasi
-    st.markdown("### Matriks Transformasi (3x3)")
-    st.write(T)
-
-    # Plot sebelum & sesudah
-    st.markdown("### Visualisasi Bentuk Sebelum dan Sesudah Transformasi")
-    fig, ax = plt.subplots()
-    # Bentuk awal
-    ax.plot(base_points[:, 0], base_points[:, 1], marker="o", label="Original")
-    # Bentuk hasil
-    ax.plot(
-        transformed_points[:, 0],
-        transformed_points[:, 1],
-        marker="o",
-        linestyle="--",
-        label="Transformed"
-    )
-    ax.set_aspect("equal", "box")
-    ax.grid(True)
-    ax.legend()
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_title(f"{transform_type} on {shape_name}")
-
-    st.pyplot(fig)
-
-    # Penjelasan singkat
-    st.markdown("### Penjelasan Singkat")
-    st.write(
-        f"""
-        - Bentuk awal yang digunakan: **{shape_name}**  
-        - Jenis transformasi: **{transform_type}**  
-        - Matriks transformasi di atas digunakan untuk mengalikan koordinat titik 
-          dalam bentuk homogeneous (3x1).  
-        - Hasil perkalian matriks memberikan koordinat baru (bentuk tertransformasi).
-        """
-    )
-
-
-if __name__ == "__main__":
-    main()
+        st.markdown("---")
+        show_matrix(M)
